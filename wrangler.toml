@@ -1,0 +1,14 @@
+name = "calorie-api"
+main = "worker/index.js"
+compatibility_date = "2025-07-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "calorielog"
+database_id = "a06cb362-99c9-46d8-b3d9-0df9acab66ba"
+
+[ai]
+binding = "AI"
+
+[env.production]
+name = "calorie-api"

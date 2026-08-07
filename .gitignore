@@ -1,0 +1,9 @@
+# Node build artifacts
+node_modules/
+dist/
+*.local
+.env
+.wrangler/
+.last-sync-hash
+
+# Wiki sync output is committed so CF Pages has data at build time
