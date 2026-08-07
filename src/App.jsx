@@ -7,9 +7,10 @@ import ProfileTab from './components/ProfileTab.jsx'
 import AuthScreen from './components/AuthScreen.jsx'
 import AddFoodSheet from './components/AddFoodSheet.jsx'
 import VisionSheet from './components/VisionSheet.jsx'
+import EditItemSheet from './components/EditItemSheet.jsx'
 import { fmt, weekDays, monthDays, monthAgg, dateKey, dayTotal } from './lib/data.js'
 import { loadProfile, saveProfile, calcBudget, calcMacroTargets, dayMacros } from './lib/profile.js'
-import { setToken, getToken, fetchDays, putDay, fetchProfileRemote, fetchWeightsRemote, fetchFoods } from './lib/api.js'
+import { setToken, getToken, fetchDays, putDay, deleteDay, fetchProfileRemote, fetchWeightsRemote, fetchFoods } from './lib/api.js'
 
 const TABS = [
   { id: 'today', label: '今日', icon: Flame },
@@ -33,6 +34,8 @@ export default function App() {
   const [monthOffset, setMonthOffset] = useState(0)
   const [showAdd, setShowAdd] = useState(false)
   const [showVision, setShowVision] = useState(false)
+  const [editingItem, setEditingItem] = useState(null) // { date, mealIdx, itemIdx, item }
+  const [confirmDeleteDay, setConfirmDeleteDay] = useState(null) // date string
   const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
@@ -170,6 +173,58 @@ export default function App() {
     try { await putDay(key, meals, total) } catch (e) { console.error('save failed', e) }
   }
 
+  // Recompute meal/day totals after an item-level change, then persist.
+  const persistDay = async (key, meals) => {
+    const total = meals.reduce((s, m) => s + (m.total || 0), 0)
+    setData((d) => ({ ...d, days: { ...d.days, [key]: { date: key, meals, total } } }))
+    try { await putDay(key, meals, total) } catch (e) { console.error('save failed', e) }
+  }
+
+  const handleEditItem = (date, mealIdx, itemIdx) => {
+    const item = daysMap[date]?.meals?.[mealIdx]?.items?.[itemIdx]
+    if (!item) return
+    setEditingItem({ date, mealIdx, itemIdx, item: { ...item } })
+  }
+
+  const handleSaveItem = async (patch) => {
+    if (!editingItem) return
+    const { date, mealIdx, itemIdx } = editingItem
+    const day = daysMap[date] || { date, meals: [], total: 0 }
+    const meals = (day.meals || []).map((m, mi) => {
+      if (mi !== mealIdx) return { ...m, items: [...m.items] }
+      const items = m.items.map((it, ii) => (ii === itemIdx ? { ...it, ...patch } : it))
+      return { ...m, items, total: items.reduce((s, it) => s + (it.kcal || 0), 0) }
+    })
+    setEditingItem(null)
+    await persistDay(date, meals)
+  }
+
+  const handleDeleteItem = async (date, mealIdx, itemIdx) => {
+    const day = daysMap[date] || { date, meals: [], total: 0 }
+    const meals = (day.meals || []).map((m, mi) => {
+      if (mi !== mealIdx) return { ...m, items: [...m.items] }
+      const items = m.items.filter((_, ii) => ii !== itemIdx)
+      return { ...m, items, total: items.reduce((s, it) => s + (it.kcal || 0), 0) }
+    }).filter((m) => m.items.length > 0) // drop empty meals
+    await persistDay(date, meals)
+  }
+
+  const handleDeleteMeal = async (date, mealIdx) => {
+    const day = daysMap[date] || { date, meals: [], total: 0 }
+    const meals = (day.meals || []).filter((_, mi) => mi !== mealIdx)
+    await persistDay(date, meals)
+  }
+
+  const handleDeleteDay = async (date) => {
+    setConfirmDeleteDay(null)
+    setData((d) => {
+      const days = { ...d.days }
+      delete days[date]
+      return { ...d, days }
+    })
+    try { await deleteDay(date) } catch (e) { console.error('delete failed', e) }
+  }
+
   if (!authed) return <AuthScreen onAuth={handleAuth} />
 
   return (
@@ -233,13 +288,6 @@ export default function App() {
               <ChevronRight size={20} />
             </button>
           </div>
-          <DayView
-            day={selectedDay}
-            budget={budget}
-            macros={dayMacros(selectedDay)}
-            macroTargets={macroTargets}
-            emptyText="呢日未有記錄"
-          />
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={() => setShowAdd(true)}
@@ -256,6 +304,17 @@ export default function App() {
               <Camera size={17} /> 影相記錄
             </button>
           </div>
+          <DayView
+            day={selectedDay}
+            budget={budget}
+            macros={dayMacros(selectedDay)}
+            macroTargets={macroTargets}
+            emptyText="呢日未有記錄"
+            onEditItem={handleEditItem}
+            onDeleteItem={handleDeleteItem}
+            onDeleteMeal={handleDeleteMeal}
+            onDeleteDay={(date) => setConfirmDeleteDay(date)}
+          />
         </div>
       )}
 
@@ -344,6 +403,44 @@ export default function App() {
           onClose={() => setShowVision(false)}
           onAddAll={(mealName, items) => handleAddAllItems(selectedDate, mealName, items)}
         />
+      )}
+
+      {/* Edit item sheet */}
+      {editingItem && (
+        <EditItemSheet
+          item={editingItem.item}
+          onClose={() => setEditingItem(null)}
+          onSave={handleSaveItem}
+        />
+      )}
+
+      {/* Delete day confirm */}
+      {confirmDeleteDay && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center" role="dialog" aria-label="刪除確認">
+          <div className="absolute inset-0" style={{ backgroundColor: 'rgba(0,0,0,0.4)' }} onClick={() => setConfirmDeleteDay(null)} />
+          <div className="relative w-[85%] max-w-[340px] rounded-2xl p-5" style={{ backgroundColor: 'var(--surface)' }}>
+            <div className="text-center text-[16px] font-bold">刪除呢日記錄？</div>
+            <div className="mt-1 text-center text-[13px]" style={{ color: 'var(--text3)' }}>
+              {confirmDeleteDay} 嘅飲食記錄會永久刪除，無法復原。
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setConfirmDeleteDay(null)}
+                className="btn-press rounded-xl py-2.5 text-[14px] font-semibold"
+                style={{ backgroundColor: 'var(--surface2)', color: 'var(--text2)' }}
+              >
+                取消
+              </button>
+              <button
+                onClick={() => handleDeleteDay(confirmDeleteDay)}
+                className="btn-press rounded-xl py-2.5 text-[14px] font-bold text-white"
+                style={{ backgroundColor: 'var(--red)' }}
+              >
+                刪除
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Tab bar */}

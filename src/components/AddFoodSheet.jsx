@@ -47,7 +47,7 @@ export default function AddFoodSheet({ foods, onClose, onAdd }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" role="dialog" aria-label="新增食物">
+    <div className="fixed inset-0 z-[60] flex items-end justify-center" role="dialog" aria-label="新增食物">
       <div className="absolute inset-0" style={{ backgroundColor: 'rgba(0,0,0,0.4)' }} onClick={close} />
       <div
         className="relative w-full max-w-[520px] rounded-t-[24px] px-4 pb-6 pt-3"

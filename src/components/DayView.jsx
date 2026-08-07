@@ -1,8 +1,9 @@
 import ProgressRing from './ProgressRing.jsx'
 import MealList from './MealList.jsx'
 import MacroBars from './MacroBars.jsx'
+import { Trash2 } from 'lucide-react'
 
-export default function DayView({ day, budget, macros, macroTargets, emptyText = '今日未有記錄' }) {
+export default function DayView({ day, budget, macros, macroTargets, emptyText = '今日未有記錄', onEditItem, onDeleteItem, onDeleteMeal, onDeleteDay }) {
   const total = day?.total || 0
   const meals = day?.meals || []
   const remaining = budget - total
@@ -36,8 +37,22 @@ export default function DayView({ day, budget, macros, macroTargets, emptyText =
       {/* Meals */}
       <div className="flex items-center justify-between px-1">
         <h2 className="large-title !text-[22px] font-bold">飲食明細</h2>
+        {onDeleteDay && (day?.meals?.length || 0) > 0 && (
+          <button
+            onClick={() => onDeleteDay(day.date)}
+            className="btn-press flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-semibold"
+            style={{ color: 'var(--red)', backgroundColor: 'color-mix(in srgb, var(--red) 10%, transparent)' }}
+          >
+            <Trash2 size={12} /> 刪除呢日
+          </button>
+        )}
       </div>
-      <MealList meals={meals} />
+      <MealList
+        meals={meals}
+        onEditItem={(mi, ii) => onEditItem?.(day.date, mi, ii)}
+        onDeleteItem={(mi, ii) => onDeleteItem?.(day.date, mi, ii)}
+        onDeleteMeal={(mi) => onDeleteMeal?.(day.date, mi)}
+      />
       {!meals.length && (
         <div className="px-4 text-center text-[12px]" style={{ color: 'var(--text3)' }}>
           {emptyText}

@@ -39,6 +39,7 @@ export const register = (username, password, displayName) =>
 export const fetchDays = () => api('/api/days')
 export const putDay = (date, meals, total) =>
   api(`/api/day/${date}`, { method: 'PUT', body: JSON.stringify({ meals, total }) })
+export const deleteDay = (date) => api(`/api/day/${date}`, { method: 'DELETE' })
 
 export const fetchProfileRemote = async () => {
   try { return (await api('/api/profile')).profile } catch { return null }

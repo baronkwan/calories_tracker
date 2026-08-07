@@ -209,6 +209,12 @@ export default {
         return json({ ok: true, date, total })
       }
 
+      if (method === 'DELETE' && dayMatch) {
+        const date = dayMatch[1]
+        await db.prepare('DELETE FROM daily_logs WHERE user_id = ? AND date = ?').bind(uid, date).run()
+        return json({ ok: true, date })
+      }
+
       if (method === 'GET' && path === '/api/profile') {
         const row = await db.prepare('SELECT profile_json FROM profile WHERE user_id = ?').bind(uid).first()
         return json({ profile: row ? JSON.parse(row.profile_json) : null })
