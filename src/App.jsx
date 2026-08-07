@@ -8,7 +8,7 @@ import AuthScreen from './components/AuthScreen.jsx'
 import AddFoodSheet from './components/AddFoodSheet.jsx'
 import VisionSheet from './components/VisionSheet.jsx'
 import EditItemSheet from './components/EditItemSheet.jsx'
-import { fmt, weekDays, monthDays, monthAgg, dateKey, dayTotal } from './lib/data.js'
+import { fmt, lastNDays, streakCount, monthDays, monthAgg, dateKey, dayTotal } from './lib/data.js'
 import { loadProfile, saveProfile, calcBudget, calcMacroTargets, dayMacros } from './lib/profile.js'
 import { setToken, getToken, fetchDays, putDay, deleteDay, fetchProfileRemote, fetchWeightsRemote, fetchFoods } from './lib/api.js'
 
@@ -32,6 +32,7 @@ export default function App() {
   const [profile, setProfile] = useState(() => loadProfile())
   const [selectedDate, setSelectedDate] = useState(() => new Date())
   const [monthOffset, setMonthOffset] = useState(0)
+  const [reportRange, setReportRange] = useState(7) // 7 | 30 | 90
   const [showAdd, setShowAdd] = useState(false)
   const [showVision, setShowVision] = useState(false)
   const [editingItem, setEditingItem] = useState(null) // { date, mealIdx, itemIdx, item }
@@ -93,20 +94,32 @@ export default function App() {
   const now = useMemo(() => new Date(), [])
   const todayKey = dateKey(now)
 
-  const weekRef = useMemo(() => (tab === 'weekly' ? selectedDate : now), [tab, selectedDate, now])
-
-  const week = useMemo(
+  // Report range (7/30/90 days ending today) — richer metrics for 週報
+  const rangeDays = useMemo(
     () =>
-      weekDays(weekRef).map((d) => {
+      lastNDays(now, reportRange).map((d) => {
         const key = dateKey(d)
         return { key, date: d, isToday: key === todayKey, kcal: dayTotal(daysMap[key]) }
       }),
-    [weekRef, daysMap, todayKey]
+    [reportRange, now, daysMap, todayKey]
   )
-  const weekTotal = week.reduce((s, d) => s + d.kcal, 0)
-  const weekRecorded = week.filter((d) => d.kcal > 0)
-  const weekAvg = weekRecorded.length ? weekTotal / weekRecorded.length : 0
-  const weekOver = week.filter((d) => d.kcal > budget).length
+  const rangeStats = useMemo(() => {
+    const recorded = rangeDays.filter((d) => d.kcal > 0)
+    const total = rangeDays.reduce((s, d) => s + d.kcal, 0)
+    const max = recorded.reduce((m, d) => (d.kcal > m.kcal ? { kcal: d.kcal, key: d.key } : m), { kcal: 0, key: null })
+    const min = recorded.reduce((m, d) => (m.key === null || d.kcal < m.kcal ? { kcal: d.kcal, key: d.key } : m), { kcal: 0, key: null })
+    return {
+      total,
+      recordedCount: recorded.length,
+      totalDays: rangeDays.length,
+      avgRecorded: recorded.length ? total / recorded.length : 0,
+      avgAll: rangeDays.length ? total / rangeDays.length : 0,
+      overCount: recorded.filter((d) => d.kcal > budget).length,
+      max,
+      min,
+      streak: streakCount(daysMap, now),
+    }
+  }, [rangeDays, budget, daysMap, now])
 
   const monthBase = useMemo(() => new Date(now.getFullYear(), now.getMonth() + monthOffset, 1), [now, monthOffset])
   const mYear = monthBase.getFullYear()
@@ -318,26 +331,75 @@ export default function App() {
         </div>
       )}
 
-      {/* Weekly */}
+      {/* Weekly / range report */}
       {tab === 'weekly' && (
         <div className="space-y-5">
-          <div className="group-list px-4 py-4">
-            <WeeklyChart days={week} budget={budget} />
+          {/* Range selector */}
+          <div className="group-list grid grid-cols-3 gap-1 p-1">
+            {[7, 30, 90].map((n) => (
+              <button
+                key={n}
+                onClick={() => setReportRange(n)}
+                className="btn-press rounded-xl py-2 text-[13px] font-bold"
+                style={{
+                  backgroundColor: reportRange === n ? 'var(--accent)' : 'transparent',
+                  color: reportRange === n ? '#fff' : 'var(--text2)',
+                }}
+              >
+                {n === 7 ? '本週' : n === 30 ? '30日' : '90日'}
+              </button>
+            ))}
           </div>
-          <div className="grid grid-cols-3 text-center">
-            <div>
-              <div className="tnum text-[20px] font-bold">{fmt(weekTotal)}</div>
-              <div className="text-[11px]" style={{ color: 'var(--text3)' }}>本週總攝入</div>
+
+          <div className="group-list px-4 py-4">
+            <WeeklyChart days={rangeDays} budget={budget} />
+          </div>
+
+          {/* Summary stats */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="group-list px-4 py-3">
+              <div className="tnum text-[20px] font-bold">{fmt(rangeStats.total)}</div>
+              <div className="text-[11px]" style={{ color: 'var(--text3)' }}>總攝入 / {rangeStats.totalDays}日</div>
             </div>
-            <div className="stat-divider">
-              <div className="tnum text-[20px] font-bold">{fmt(weekAvg)}</div>
-              <div className="text-[11px]" style={{ color: 'var(--text3)' }}>日均（有記錄日）</div>
+            <div className="group-list px-4 py-3">
+              <div className="tnum text-[20px] font-bold">{fmt(rangeStats.avgRecorded)}</div>
+              <div className="text-[11px]" style={{ color: 'var(--text3)' }}>日均（{rangeStats.recordedCount}日有記錄）</div>
             </div>
-            <div className="stat-divider">
-              <div className="tnum text-[20px] font-bold" style={{ color: weekOver ? 'var(--red)' : 'var(--green)' }}>
-                {weekOver}
+            <div className="group-list px-4 py-3">
+              <div className="tnum text-[20px] font-bold" style={{ color: rangeStats.overCount ? 'var(--red)' : 'var(--green)' }}>
+                {rangeStats.overCount}
               </div>
-              <div className="text-[11px]" style={{ color: 'var(--text3)' }}>超標日 / 7</div>
+              <div className="text-[11px]" style={{ color: 'var(--text3)' }}>超標日 / {rangeStats.recordedCount}記錄日</div>
+            </div>
+            <div className="group-list px-4 py-3">
+              <div className="tnum text-[20px] font-bold" style={{ color: 'var(--orange)' }}>🔥 {rangeStats.streak}</div>
+              <div className="text-[11px]" style={{ color: 'var(--text3)' }}>連續記錄日</div>
+            </div>
+          </div>
+
+          {/* Best / worst days */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="group-list px-4 py-3">
+              <div className="text-[11px] font-semibold" style={{ color: 'var(--text3)' }}>最高攝入日</div>
+              {rangeStats.max.key ? (
+                <>
+                  <div className="tnum text-[17px] font-bold" style={{ color: 'var(--red)' }}>{fmt(rangeStats.max.kcal)}</div>
+                  <div className="text-[11px]" style={{ color: 'var(--text3)' }}>{rangeStats.max.key} · 超 {fmt(rangeStats.max.kcal - budget)}</div>
+                </>
+              ) : (
+                <div className="text-[13px]" style={{ color: 'var(--text3)' }}>—</div>
+              )}
+            </div>
+            <div className="group-list px-4 py-3">
+              <div className="text-[11px] font-semibold" style={{ color: 'var(--text3)' }}>最低攝入日</div>
+              {rangeStats.min.key ? (
+                <>
+                  <div className="tnum text-[17px] font-bold" style={{ color: 'var(--green)' }}>{fmt(rangeStats.min.kcal)}</div>
+                  <div className="text-[11px]" style={{ color: 'var(--text3)' }}>{rangeStats.min.key} · 少 {fmt(budget - rangeStats.min.kcal)}</div>
+                </>
+              ) : (
+                <div className="text-[13px]" style={{ color: 'var(--text3)' }}>—</div>
+              )}
             </div>
           </div>
         </div>

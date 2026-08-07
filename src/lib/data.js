@@ -22,6 +22,37 @@ export function weekDays(reference) {
   return days
 }
 
+// Last N days ending at `reference` (inclusive), oldest first.
+export function lastNDays(reference, n) {
+  const end = new Date(reference)
+  end.setHours(0, 0, 0, 0)
+  const days = []
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(end)
+    d.setDate(end.getDate() - i)
+    days.push(d)
+  }
+  return days
+}
+
+// Consecutive recorded days ending at the most recent recorded day (streak).
+export function streakCount(daysMap, reference) {
+  let d = new Date(reference)
+  d.setHours(0, 0, 0, 0)
+  let count = 0
+  while (true) {
+    const key = dateKey(d)
+    const day = daysMap[key]
+    if (day && day.total > 0) {
+      count++
+      d.setDate(d.getDate() - 1)
+    } else {
+      break
+    }
+  }
+  return count
+}
+
 export function monthDays(year, month) {
   const first = new Date(year, month, 1)
   const count = new Date(year, month + 1, 0).getDate()
