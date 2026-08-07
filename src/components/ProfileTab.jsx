@@ -62,6 +62,7 @@ function Segmented({ options, value, onChange, labels }) {
 
 export default function ProfileTab({ profile, onSave, user, onLogout }) {
   const [draft, setDraft] = useState(profile)
+  const [weightInput, setWeightInput] = useState(String(profile.weightKg))
   const [saved, setSaved] = useState(false)
   const [pw, setPw] = useState({ old: '', next: '' })
   const [pwMsg, setPwMsg] = useState('')
@@ -74,9 +75,23 @@ export default function ProfileTab({ profile, onSave, user, onLogout }) {
 
   const set = (patch) => { setDraft((d) => ({ ...d, ...patch })); setSaved(false) }
 
+  // Weight is edited as free text so users can type any number (no premature clamp).
+  // Returns the committed kg so callers can build the next draft synchronously
+  // (setDraft is async — reading `draft` right after would see the OLD value).
+  const commitWeight = (v) => {
+    const n = Number(v)
+    const kg = Number.isFinite(n) && n > 0 ? Math.min(250, Math.max(30, n)) : draft.weightKg
+    set({ weightKg: kg })
+    setWeightInput(String(kg))
+    return kg
+  }
+
   const handleSave = () => {
-    onSave(draft)
-    saveProfileRemote(draft) // cloud sync
+    const kg = commitWeight(weightInput) // flush any in-progress weight edit
+    const next = { ...draft, weightKg: kg }
+    setDraft(next)
+    onSave(next)
+    saveProfileRemote(next) // cloud sync
     setSaved(true)
     setTimeout(() => setSaved(false), 1800)
   }
@@ -93,12 +108,13 @@ export default function ProfileTab({ profile, onSave, user, onLogout }) {
   }
 
   const handleLogWeight = () => {
+    const kg = commitWeight(weightInput) // flush any in-progress weight edit
     const today = dateKey(new Date())
     const existing = (draft.weightLog || []).filter((w) => w.date !== today)
-    const next = { ...draft, weightLog: [...existing, { date: today, kg: draft.weightKg }] }
+    const next = { ...draft, weightKg: kg, weightLog: [...existing, { date: today, kg }] }
     setDraft(next)
     onSave(next) // persist immediately
-    saveWeightRemote(today, draft.weightKg) // cloud sync
+    saveWeightRemote(today, kg) // cloud sync
     setSaved(true)
     setTimeout(() => setSaved(false), 1800)
   }
@@ -174,8 +190,9 @@ export default function ProfileTab({ profile, onSave, user, onLogout }) {
             <input
               type="number"
               inputMode="decimal"
-              value={draft.weightKg}
-              onChange={(e) => set({ weightKg: Math.max(30, Math.min(250, Number(e.target.value) || 0)) })}
+              value={weightInput}
+              onChange={(e) => setWeightInput(e.target.value)}
+              onBlur={() => commitWeight(weightInput)}
               className="tnum w-24 rounded-lg border-0 px-3 py-1.5 text-right text-[15px] font-semibold outline-none"
               style={{ backgroundColor: 'var(--surface2)', color: 'var(--text)' }}
             />

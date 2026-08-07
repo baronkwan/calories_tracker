@@ -20,11 +20,13 @@ export const RATE_OPTIONS = [
   { id: '1', label: '1 kg/週' },
 ]
 
+// Neutral defaults — NOT any specific user's real data. Each user must set
+// their own; new accounts must never inherit someone else's body metrics.
 export const DEFAULT_PROFILE = {
-  gender: 'male',
-  age: 35,
-  heightCm: 178,
-  weightKg: 78.5,
+  gender: 'female',
+  age: 30,
+  heightCm: 165,
+  weightKg: 60,
   activity: 'sedentary',
   goal: 'maintain',
   rate: 0.5, // kg/week for lose/gain

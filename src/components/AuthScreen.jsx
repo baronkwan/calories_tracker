@@ -17,6 +17,10 @@ export default function AuthScreen({ onAuth }) {
       const res = mode === 'login'
         ? await login(username, password)
         : await register(username, password, displayName || username)
+      if (mode === 'register') {
+        // A brand-new account must never inherit a previous user's local profile.
+        localStorage.removeItem('cd-profile')
+      }
       onAuth(res.user, res.token)
     } catch (err) {
       setError(err.message)

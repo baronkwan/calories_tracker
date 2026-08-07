@@ -144,6 +144,7 @@ export default function App() {
     setToken(null)
     setUser(null)
     setAuthed(false)
+    localStorage.removeItem('cd-profile') // never leak one user's profile to the next
     setData({ budget: 2073, days: {}, foods: [] })
     setProfile(loadProfile())
   }
