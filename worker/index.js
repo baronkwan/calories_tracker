@@ -119,81 +119,33 @@ export default {
         return json({ token, user: { id: row.id, username: row.username, displayName: row.display_name } })
       }
 
-      // ---- Admin routes (BK / user 1, used by the wiki sync pipeline) ----
-      // Checked BEFORE the auth gate — admin requests carry x-admin-key, not Bearer.
+      // ---- Auth: admin key (BK / user 1, sync pipeline) OR Bearer JWT ----
       const adminUid_ = adminUid(request, env)
-      if (adminUid_ != null) {
-        if (method === 'GET' && path === '/api/admin/days') {
-          const rows = await db
-            .prepare('SELECT date, total, meals_json, updated_at FROM daily_logs WHERE user_id = ? ORDER BY date')
-            .bind(adminUid_)
-            .all()
-          const days = {}
-          for (const r of rows.results) days[r.date] = { date: r.date, meals: JSON.parse(r.meals_json), total: r.total, updated_at: r.updated_at }
-          return json({ days })
+      const auth = await requireAuth(request, env)
+      const uid = adminUid_ != null ? adminUid_ : auth ? await resolveUid(env, auth) : null
+      if (!uid) return error('需要登入', 401)
+
+      // Admin path aliases (/api/admin/*) used by the wiki sync pipeline map to the same routes.
+      const p = path.startsWith('/api/admin/') ? '/api/' + path.slice('/api/admin/'.length) : path
+
+      // Admin-only: foods replace (users only GET the shared catalog).
+      if (method === 'PUT' && path === '/api/admin/foods') {
+        const body = await request.json()
+        const foods = Array.isArray(body.foods) ? body.foods : []
+        await db.prepare('DELETE FROM foods').run()
+        if (foods.length) {
+          const stmt = db.prepare('INSERT INTO foods (name, portion, kcal, p, c, f) VALUES (?, ?, ?, ?, ?, ?)')
+          await db.batch(foods.map((f) => stmt.bind(f.name, f.portion || '', Number(f.kcal) || 0, Number(f.p) || 0, Number(f.c) || 0, Number(f.f) || 0)))
         }
-        const adminDay = path.match(/^\/api\/admin\/day\/(\d{4}-\d{2}-\d{2})$/)
-        if (method === 'PUT' && adminDay) {
-          const date = adminDay[1]
-          const body = await request.json()
-          const meals = Array.isArray(body.meals) ? body.meals : []
-          const total = Number(body.total) || meals.reduce((s, m) => s + (m.total || 0), 0)
-          await upsertDay(db, adminUid_, date, meals, total)
-          return json({ ok: true, date, total })
-        }
-        if (method === 'GET' && path === '/api/admin/profile') {
-          const row = await db.prepare('SELECT profile_json FROM profile WHERE user_id = ?').bind(adminUid_).first()
-          return json({ profile: row ? JSON.parse(row.profile_json) : null })
-        }
-        if (method === 'PUT' && path === '/api/admin/profile') {
-          const body = await request.json()
-          await db
-            .prepare("INSERT INTO profile (user_id, profile_json, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(user_id) DO UPDATE SET profile_json = excluded.profile_json, updated_at = excluded.updated_at")
-            .bind(adminUid_, JSON.stringify(body.profile || {}))
-            .run()
-          return json({ ok: true })
-        }
-        if (method === 'GET' && path === '/api/admin/weight') {
-          const rows = await db.prepare('SELECT date, kg FROM weight_log WHERE user_id = ? ORDER BY date').bind(adminUid_).all()
-          return json({ weights: rows.results })
-        }
-        if (method === 'PUT' && path === '/api/admin/weight') {
-          const body = await request.json()
-          const date = String(body.date || '')
-          const kg = Number(body.kg)
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(kg)) return error('invalid date or kg')
-          await db
-            .prepare("INSERT INTO weight_log (user_id, date, kg, created_at) VALUES (?, ?, ?, datetime('now')) ON CONFLICT(user_id, date) DO UPDATE SET kg = excluded.kg, created_at = excluded.created_at")
-            .bind(adminUid_, date, kg)
-            .run()
-          return json({ ok: true })
-        }
-        if (method === 'PUT' && path === '/api/admin/foods') {
-          const body = await request.json()
-          const foods = Array.isArray(body.foods) ? body.foods : []
-          await db.prepare('DELETE FROM foods').run()
-          if (foods.length) {
-            const stmt = db.prepare('INSERT INTO foods (name, portion, kcal, p, c, f) VALUES (?, ?, ?, ?, ?, ?)')
-            await db.batch(foods.map((f) => stmt.bind(f.name, f.portion || '', Number(f.kcal) || 0, Number(f.p) || 0, Number(f.c) || 0, Number(f.f) || 0)))
-          }
-          return json({ ok: true, count: foods.length })
-        }
+        return json({ ok: true, count: foods.length })
       }
 
-      // ---- Auth: user routes ----
-      const auth = await requireAuth(request, env)
-      if (!auth) return error('需要登入', 401)
-
-      if (method === 'GET' && path === '/api/me') {
-        const uid = await resolveUid(env, auth)
+      if (method === 'GET' && p === '/api/me') {
         const row = await db.prepare('SELECT id, username, display_name FROM users WHERE id = ?').bind(uid).first()
         return row ? json({ user: { id: row.id, username: row.username, displayName: row.display_name } }) : error('not found', 404)
       }
 
-      const uid = await resolveUid(env, auth)
-      if (!uid) return error('not found', 404)
-
-      if (method === 'GET' && path === '/api/days') {
+      if (method === 'GET' && p === '/api/days') {
         const rows = await db
           .prepare('SELECT date, total, meals_json, updated_at FROM daily_logs WHERE user_id = ? ORDER BY date')
           .bind(uid)
@@ -203,7 +155,7 @@ export default {
         return json({ days })
       }
 
-      const dayMatch = path.match(/^\/api\/day\/(\d{4}-\d{2}-\d{2})$/)
+      const dayMatch = p.match(/^\/api\/day\/(\d{4}-\d{2}-\d{2})$/)
       if (method === 'PUT' && dayMatch) {
         const date = dayMatch[1]
         const body = await request.json()
@@ -219,12 +171,12 @@ export default {
         return json({ ok: true, date })
       }
 
-      if (method === 'GET' && path === '/api/profile') {
+      if (method === 'GET' && p === '/api/profile') {
         const row = await db.prepare('SELECT profile_json FROM profile WHERE user_id = ?').bind(uid).first()
         return json({ profile: row ? JSON.parse(row.profile_json) : null })
       }
 
-      if (method === 'PUT' && path === '/api/profile') {
+      if (method === 'PUT' && p === '/api/profile') {
         const body = await request.json()
         await db
           .prepare("INSERT INTO profile (user_id, profile_json, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(user_id) DO UPDATE SET profile_json = excluded.profile_json, updated_at = excluded.updated_at")
@@ -233,18 +185,18 @@ export default {
         return json({ ok: true })
       }
 
-      if (method === 'GET' && path === '/api/weight') {
+      if (method === 'GET' && p === '/api/weight') {
         const rows = await db.prepare('SELECT date, kg FROM weight_log WHERE user_id = ? ORDER BY date').bind(uid).all()
         return json({ weights: rows.results })
       }
 
-      if (method === 'GET' && path === '/api/foods') {
+      if (method === 'GET' && p === '/api/foods') {
         const rows = await db.prepare('SELECT name, portion, kcal, p, c, f FROM foods ORDER BY name').all()
         return json({ foods: rows.results })
       }
 
       // ---- Vision: photo/text → food items + calories (Workers AI Gemma 4) ----
-      if (method === 'POST' && path === '/api/vision') {
+      if (method === 'POST' && p === '/api/vision') {
         const body = await request.json().catch(() => ({}))
         const imageBase64 = typeof body.imageBase64 === 'string' ? body.imageBase64 : ''
         const userText = typeof body.text === 'string' ? body.text.trim() : ''
@@ -301,7 +253,7 @@ ${userText ? `用戶描述：${userText}\n` : ''}${imageBase64 ? '（請睇埋�
         return json({ ok: true, description: String(parsed.description || ''), items, total })
       }
 
-      if (method === 'PUT' && path === '/api/weight') {
+      if (method === 'PUT' && p === '/api/weight') {
         const body = await request.json()
         const date = String(body.date || '')
         const kg = Number(body.kg)
@@ -313,7 +265,7 @@ ${userText ? `用戶描述：${userText}\n` : ''}${imageBase64 ? '（請睇埋�
         return json({ ok: true })
       }
 
-      if (method === 'PUT' && path === '/api/password') {
+      if (method === 'PUT' && p === '/api/password') {
         const body = await request.json()
         const row = await db.prepare('SELECT password_hash FROM users WHERE id = ?').bind(uid).first()
         if (!row || !(await verifyPassword(String(body.oldPassword || ''), row.password_hash))) return error('舊密碼錯誤', 401)
@@ -325,7 +277,7 @@ ${userText ? `用戶描述：${userText}\n` : ''}${imageBase64 ? '（請睇埋�
       }
 
       // ---- Exercises (manual + Apple Health import) ----
-      if (method === 'GET' && path === '/api/exercises') {
+      if (method === 'GET' && p === '/api/exercises') {
         const u = new URL(request.url)
         const from = u.searchParams.get('from')
         const to = u.searchParams.get('to')
@@ -338,7 +290,7 @@ ${userText ? `用戶描述：${userText}\n` : ''}${imageBase64 ? '（請睇埋�
         return json({ exercises: rows.results })
       }
 
-      if (method === 'POST' && path === '/api/exercises') {
+      if (method === 'POST' && p === '/api/exercises') {
         const body = await request.json().catch(() => ({}))
         const date = String(body.date || '')
         const type = String(body.type || 'other')
@@ -361,7 +313,7 @@ ${userText ? `用戶描述：${userText}\n` : ''}${imageBase64 ? '（請睇埋�
         return json({ ok: true, id: res.meta.last_row_id, kcal, weight })
       }
 
-      const exDelete = path.match(/^\/api\/exercises\/(\d+)$/)
+      const exDelete = p.match(/^\/api\/exercises\/(\d+)$/)
       if (method === 'DELETE' && exDelete) {
         await db.prepare('DELETE FROM exercise_log WHERE id = ? AND user_id = ?').bind(Number(exDelete[1]), uid).run()
         return json({ ok: true })
@@ -369,7 +321,7 @@ ${userText ? `用戶描述：${userText}\n` : ''}${imageBase64 ? '（請睇埋�
 
       // Apple Health batch import (Shortcut → worker). Accepts both admin key
       // (BK's own iPhone shortcut) and Bearer JWT.
-      if (method === 'POST' && path === '/api/exercises/import') {
+      if (method === 'POST' && p === '/api/exercises/import') {
         const body = await request.json().catch(() => ({}))
         const items = Array.isArray(body.items) ? body.items : []
         if (!items.length) return json({ ok: true, added: 0, kcal: 0, skipped: 0 })
