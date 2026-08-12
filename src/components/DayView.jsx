@@ -2,7 +2,7 @@ import ProgressRing from './ProgressRing.jsx'
 import MealList from './MealList.jsx'
 import MacroBars from './MacroBars.jsx'
 import ExerciseList from './ExerciseList.jsx'
-import { Trash2, Flame } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
 
 export default function DayView({ day, budget, macros, macroTargets, exercises = [], emptyText = '今日未有記錄', onEditItem, onDeleteItem, onDeleteMeal, onDeleteDay, onAddExercise, onDeleteExercise }) {
   const total = day?.total || 0
@@ -15,7 +15,7 @@ export default function DayView({ day, budget, macros, macroTargets, exercises =
     <div className="space-y-5">
       {/* Hero */}
       <div className="group-list flex flex-col items-center px-4 py-6">
-        <ProgressRing total={total} budget={budget} />
+        <ProgressRing total={total} budget={budget} burn={burn} />
         <div className="mt-4 grid w-full grid-cols-4 text-center">
           <div>
             <div className="tnum text-[17px] font-bold">{Math.round((total / budget) * 100)}%</div>
@@ -36,14 +36,6 @@ export default function DayView({ day, budget, macros, macroTargets, exercises =
             <div className="text-[11px]" style={{ color: 'var(--text3)' }}>運動消耗</div>
           </div>
         </div>
-        {burn > 0 && (
-          <div className="mt-2 flex items-center gap-1 text-[11px] font-medium" style={{ color: 'var(--text3)' }}>
-            <Flame size={11} style={{ color: 'var(--orange)' }} />
-            攝入 {Math.round(total).toLocaleString('en-US')} − 運動 {Math.round(burn).toLocaleString('en-US')} = 淨
-            <span className="tnum font-bold" style={{ color: net >= 0 ? 'var(--green)' : 'var(--red)' }}>{Math.round(net).toLocaleString('en-US')}</span>
-            kcal
-          </div>
-        )}
       </div>
 
       {/* Macros */}

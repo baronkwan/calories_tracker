@@ -78,6 +78,18 @@ checks.push(['hero 運動消耗 = 271 kcal', burnKcal === 271, burnCell])
 const remainCell = Array.isArray(heroCells) ? heroCells.find((c) => c.includes('淨剩餘') || c.includes('淨超出')) : null
 checks.push(['hero 淨剩餘 present', remainCell !== null, remainCell])
 
+// --- Ring integration checks ---
+const ringCenter = await ev(`(() => { const wrap = document.querySelector('.group-list svg')?.closest('.relative'); return wrap ? wrap.innerText.split('\\n')[0] : null })()`)
+checks.push(['ring center shows NET (929 not 1200)', ringCenter === '929', ringCenter])
+const ringCircles = await ev(`(() => { const svg = document.querySelector('.group-list svg'); return svg ? [...svg.querySelectorAll('circle')].map(c => ({ stroke: c.getAttribute('stroke'), dash: c.getAttribute('stroke-dasharray') })) : [] })()`)
+checks.push(['ring has 3 circles (track+intake+burn)', Array.isArray(ringCircles) && ringCircles.length === 3, ringCircles])
+checks.push(['burn arc is orange tail', Array.isArray(ringCircles) && ringCircles.some((c) => c.stroke === 'var(--orange)'), ringCircles])
+checks.push(['burn arc length = burn/budget ≈ 0.171', Array.isArray(ringCircles) && ringCircles.some((c) => c.stroke === 'var(--orange)' && parseFloat(c.dash.split(' ')[0]) > 65 && parseFloat(c.dash.split(' ')[0]) < 85), ringCircles])
+const smallLineGone = await ev(`!document.body.innerText.includes('= 淨')`)
+checks.push(['small calc line removed', smallLineGone === true])
+const ringHint = await ev(`(() => { const svg = document.querySelector('.group-list svg'); const wrap = svg?.closest('.relative'); return wrap?.innerText.includes('271') })()`)
+checks.push(['ring hint shows burn 271', ringHint === true])
+
 const exText = await ev(`document.body.innerText`)
 checks.push(['運動明細 section', typeof exText === 'string' && exText.includes('運動明細')])
 checks.push(['indoor walk listed + 30 分鐘', typeof exText === 'string' && exText.includes('室內步行') && exText.includes('30 分鐘')])
