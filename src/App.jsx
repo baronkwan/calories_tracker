@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Flame, CalendarDays, BarChart3, CalendarRange, UserRound, Sun, Moon, ChevronLeft, ChevronRight, Plus, Camera } from 'lucide-react'
+import { Flame, CalendarDays, BarChart3, CalendarRange, UserRound, Sun, Moon, ChevronLeft, ChevronRight, Plus, Camera, Dumbbell } from 'lucide-react'
 import DayView from './components/DayView.jsx'
 import WeeklyChart from './components/WeeklyChart.jsx'
 import Heatmap from './components/Heatmap.jsx'
 import ProfileTab from './components/ProfileTab.jsx'
 import AuthScreen from './components/AuthScreen.jsx'
 import AddFoodSheet from './components/AddFoodSheet.jsx'
+import AddExerciseSheet from './components/AddExerciseSheet.jsx'
 import VisionSheet from './components/VisionSheet.jsx'
 import EditItemSheet from './components/EditItemSheet.jsx'
 import { fmt, lastNDays, streakCount, monthDays, monthAgg, dateKey, dayTotal } from './lib/data.js'
 import { loadProfile, saveProfile, calcBudget, calcMacroTargets, dayMacros } from './lib/profile.js'
-import { setToken, getToken, fetchDays, putDay, deleteDay, fetchProfileRemote, fetchWeightsRemote, fetchFoods } from './lib/api.js'
+import { dayExercises, dayBurn } from './lib/exercises.js'
+import { setToken, getToken, fetchDays, putDay, deleteDay, fetchProfileRemote, fetchWeightsRemote, fetchFoods, fetchExercises, addExercise, deleteExercise } from './lib/api.js'
 
 const TABS = [
   { id: 'today', label: '今日', icon: Flame },
@@ -35,6 +37,9 @@ export default function App() {
   const [reportRange, setReportRange] = useState(7) // 7 | 30 | 90
   const [showAdd, setShowAdd] = useState(false)
   const [showVision, setShowVision] = useState(false)
+  const [showAddExercise, setShowAddExercise] = useState(false)
+  const [exerciseDate, setExerciseDate] = useState(() => dateKey(new Date()))
+  const [exercises, setExercises] = useState([])
   const [editingItem, setEditingItem] = useState(null) // { date, mealIdx, itemIdx, item }
   const [confirmDeleteDay, setConfirmDeleteDay] = useState(null) // date string
   const [loadError, setLoadError] = useState('')
@@ -61,11 +66,12 @@ export default function App() {
     setLoadError('')
     ;(async () => {
       // allSettled: a failing call (e.g. profile) must NOT blank the days view
-      const [daysRes, profileRes, weightsRes, foodsRes] = await Promise.allSettled([
-        fetchDays(), fetchProfileRemote(), fetchWeightsRemote(), fetchFoods(),
+      const [daysRes, profileRes, weightsRes, foodsRes, exRes] = await Promise.allSettled([
+        fetchDays(), fetchProfileRemote(), fetchWeightsRemote(), fetchFoods(), fetchExercises(),
       ])
       if (cancelled) return
       const foods = foodsRes.status === 'fulfilled' ? foodsRes.value : []
+      if (exRes.status === 'fulfilled') setExercises(exRes.value)
       if (daysRes.status === 'fulfilled') {
         // API returns { days: {…} } — unwrap before storing
         const daysMap = daysRes.value.days || {}
@@ -91,6 +97,13 @@ export default function App() {
   const macroTargets = useMemo(() => calcMacroTargets(profile), [profile])
   const daysMap = data.days || {}
 
+  // Best current weight for exercise kcal preview (latest weight log wins).
+  const currentWeight = useMemo(() => {
+    const log = profile.weightLog || []
+    if (log.length) return log[log.length - 1].kg
+    return profile.weightKg
+  }, [profile])
+
   const now = useMemo(() => new Date(), [])
   const todayKey = dateKey(now)
 
@@ -99,17 +112,20 @@ export default function App() {
     () =>
       lastNDays(now, reportRange).map((d) => {
         const key = dateKey(d)
-        return { key, date: d, isToday: key === todayKey, kcal: dayTotal(daysMap[key]) }
+        return { key, date: d, isToday: key === todayKey, kcal: dayTotal(daysMap[key]), burn: dayBurn(exercises, key) }
       }),
-    [reportRange, now, daysMap, todayKey]
+    [reportRange, now, daysMap, todayKey, exercises]
   )
   const rangeStats = useMemo(() => {
     const recorded = rangeDays.filter((d) => d.kcal > 0)
     const total = rangeDays.reduce((s, d) => s + d.kcal, 0)
+    const burn = rangeDays.reduce((s, d) => s + d.burn, 0)
     const max = recorded.reduce((m, d) => (d.kcal > m.kcal ? { kcal: d.kcal, key: d.key } : m), { kcal: 0, key: null })
     const min = recorded.reduce((m, d) => (m.key === null || d.kcal < m.kcal ? { kcal: d.kcal, key: d.key } : m), { kcal: 0, key: null })
     return {
       total,
+      burn,
+      net: total - burn,
       recordedCount: recorded.length,
       totalDays: rangeDays.length,
       avgRecorded: recorded.length ? total / recorded.length : 0,
@@ -126,6 +142,10 @@ export default function App() {
   const mMonth = monthBase.getMonth()
   const mDays = useMemo(() => monthDays(mYear, mMonth), [mYear, mMonth])
   const mStats = useMemo(() => monthAgg(daysMap, mYear, mMonth), [daysMap, mYear, mMonth])
+  const monthBurn = useMemo(() => {
+    const prefix = `${mYear}-${String(mMonth + 1).padStart(2, '0')}`
+    return exercises.filter((e) => e.date.startsWith(prefix)).reduce((s, e) => s + (e.kcal || 0), 0)
+  }, [exercises, mYear, mMonth])
 
   const selectedKey = dateKey(selectedDate)
   const selectedDay = daysMap[selectedKey]
@@ -146,6 +166,7 @@ export default function App() {
     setAuthed(false)
     localStorage.removeItem('cd-profile') // never leak one user's profile to the next
     setData({ budget: 2073, days: {}, foods: [] })
+    setExercises([])
     setProfile(loadProfile())
   }
 
@@ -239,6 +260,27 @@ export default function App() {
     try { await deleteDay(date) } catch (e) { console.error('delete failed', e) }
   }
 
+  // Exercises: server-authoritative kcal — await POST, then append the stored row.
+  const handleAddExercise = async (payload) => {
+    try {
+      const res = await addExercise(payload.date, payload.type, payload.durationMin, payload.kcal, payload.name)
+      setExercises((xs) => [
+        ...xs,
+        { id: res.id, date: payload.date, type: payload.type, name: payload.name, duration_min: payload.durationMin, kcal: res.kcal, source: 'manual' },
+      ])
+    } catch (e) { console.error('exercise save failed', e) }
+  }
+
+  const handleDeleteExercise = async (date, id) => {
+    setExercises((xs) => xs.filter((x) => x.id !== id))
+    try { await deleteExercise(id) } catch (e) { console.error('exercise delete failed', e) }
+  }
+
+  const openAddExercise = (dateKeyStr) => {
+    setExerciseDate(dateKeyStr)
+    setShowAddExercise(true)
+  }
+
   if (!authed) return <AuthScreen onAuth={handleAuth} />
 
   return (
@@ -269,6 +311,9 @@ export default function App() {
           budget={budget}
           macros={dayMacros(todayDay)}
           macroTargets={macroTargets}
+          exercises={dayExercises(exercises, todayKey)}
+          onAddExercise={() => openAddExercise(todayKey)}
+          onDeleteExercise={handleDeleteExercise}
           emptyText="今日未有記錄 — 按＋新增食物"
         />
       )}
@@ -302,20 +347,27 @@ export default function App() {
               <ChevronRight size={20} />
             </button>
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <button
               onClick={() => setShowAdd(true)}
-              className="btn-press flex items-center justify-center gap-2 rounded-xl py-3 text-[15px] font-bold text-white"
+              className="btn-press flex items-center justify-center gap-1.5 rounded-xl py-3 text-[14px] font-bold text-white"
               style={{ backgroundColor: 'var(--accent)' }}
             >
-              <Plus size={17} /> 新增食物
+              <Plus size={16} /> 新增食物
             </button>
             <button
               onClick={() => setShowVision(true)}
-              className="btn-press flex items-center justify-center gap-2 rounded-xl py-3 text-[15px] font-bold"
+              className="btn-press flex items-center justify-center gap-1.5 rounded-xl py-3 text-[14px] font-bold"
               style={{ backgroundColor: 'var(--surface)', border: '1.5px solid var(--accent)', color: 'var(--accent)' }}
             >
-              <Camera size={17} /> 影相記錄
+              <Camera size={16} /> 影相記錄
+            </button>
+            <button
+              onClick={() => openAddExercise(selectedKey)}
+              className="btn-press flex items-center justify-center gap-1.5 rounded-xl py-3 text-[14px] font-bold"
+              style={{ backgroundColor: 'var(--surface)', border: '1.5px solid var(--orange)', color: 'var(--orange)' }}
+            >
+              <Dumbbell size={16} /> 新增運動
             </button>
           </div>
           <DayView
@@ -323,6 +375,9 @@ export default function App() {
             budget={budget}
             macros={dayMacros(selectedDay)}
             macroTargets={macroTargets}
+            exercises={dayExercises(exercises, selectedKey)}
+            onAddExercise={() => openAddExercise(selectedKey)}
+            onDeleteExercise={handleDeleteExercise}
             emptyText="呢日未有記錄"
             onEditItem={handleEditItem}
             onDeleteItem={handleDeleteItem}
@@ -375,6 +430,20 @@ export default function App() {
             <div className="group-list px-4 py-3">
               <div className="tnum text-[20px] font-bold" style={{ color: 'var(--orange)' }}>🔥 {rangeStats.streak}</div>
               <div className="text-[11px]" style={{ color: 'var(--text3)' }}>連續記錄日</div>
+            </div>
+          </div>
+
+          {/* Exercise + net stats */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="group-list px-4 py-3">
+              <div className="tnum text-[20px] font-bold" style={{ color: 'var(--orange)' }}>{fmt(rangeStats.burn)}</div>
+              <div className="text-[11px]" style={{ color: 'var(--text3)' }}>運動消耗 / {rangeStats.totalDays}日</div>
+            </div>
+            <div className="group-list px-4 py-3">
+              <div className="tnum text-[20px] font-bold" style={{ color: rangeStats.net <= 0 ? 'var(--green)' : 'var(--red)' }}>
+                {fmt(rangeStats.net)}
+              </div>
+              <div className="text-[11px]" style={{ color: 'var(--text3)' }}>淨攝入（食物 − 運動）</div>
             </div>
           </div>
 
@@ -431,18 +500,22 @@ export default function App() {
           <div className="group-list px-4 py-4">
             <Heatmap monthDays={mDays} daysMap={daysMap} budget={budget} onSelect={(d) => { setSelectedDate(d); setTab('daily') }} />
           </div>
-          <div className="grid grid-cols-3 text-center">
+          <div className="grid grid-cols-4 text-center">
             <div>
-              <div className="tnum text-[20px] font-bold">{fmt(mStats.total)}</div>
-              <div className="text-[11px]" style={{ color: 'var(--text3)' }}>月總攝入</div>
+              <div className="tnum text-[17px] font-bold">{fmt(mStats.total)}</div>
+              <div className="text-[10.5px]" style={{ color: 'var(--text3)' }}>月總攝入</div>
             </div>
             <div className="stat-divider">
-              <div className="tnum text-[20px] font-bold">{mStats.recorded ? fmt(mStats.total / mStats.recorded) : '—'}</div>
-              <div className="text-[11px]" style={{ color: 'var(--text3)' }}>日均 / {mStats.recorded}日</div>
+              <div className="tnum text-[17px] font-bold">{mStats.recorded ? fmt(mStats.total / mStats.recorded) : '—'}</div>
+              <div className="text-[10.5px]" style={{ color: 'var(--text3)' }}>日均</div>
             </div>
             <div className="stat-divider">
-              <div className="tnum text-[20px] font-bold">{mStats.recorded ? fmt(mStats.max.kcal) : '—'}</div>
-              <div className="text-[11px]" style={{ color: 'var(--text3)' }}>最高日</div>
+              <div className="tnum text-[17px] font-bold">{mStats.recorded ? fmt(mStats.max.kcal) : '—'}</div>
+              <div className="text-[10.5px]" style={{ color: 'var(--text3)' }}>最高日</div>
+            </div>
+            <div className="stat-divider">
+              <div className="tnum text-[17px] font-bold" style={{ color: 'var(--orange)' }}>{fmt(monthBurn)}</div>
+              <div className="text-[10.5px]" style={{ color: 'var(--text3)' }}>月運動消耗</div>
             </div>
           </div>
         </div>
@@ -465,6 +538,16 @@ export default function App() {
         <VisionSheet
           onClose={() => setShowVision(false)}
           onAddAll={(mealName, items) => handleAddAllItems(selectedDate, mealName, items)}
+        />
+      )}
+
+      {/* Add exercise sheet */}
+      {showAddExercise && (
+        <AddExerciseSheet
+          date={exerciseDate}
+          weightKg={currentWeight}
+          onClose={() => setShowAddExercise(false)}
+          onAdd={handleAddExercise}
         />
       )}
 

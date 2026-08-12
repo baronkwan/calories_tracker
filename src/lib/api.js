@@ -62,3 +62,10 @@ export const changePassword = (oldPassword, newPassword) =>
 
 export const visionEstimate = (payload) =>
   api('/api/vision', { method: 'POST', body: JSON.stringify(payload) })
+
+export const fetchExercises = async () => {
+  try { return (await api('/api/exercises')).exercises || [] } catch { return [] }
+}
+export const addExercise = (date, type, durationMin, kcal, name) =>
+  api('/api/exercises', { method: 'POST', body: JSON.stringify({ date, type, durationMin, kcal, name }) })
+export const deleteExercise = (id) => api(`/api/exercises/${id}`, { method: 'DELETE' })

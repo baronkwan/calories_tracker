@@ -51,3 +51,19 @@ CREATE TABLE IF NOT EXISTS foods (
   c REAL NOT NULL DEFAULT 0,
   f REAL NOT NULL DEFAULT 0
 );
+
+-- Exercise log (added 2026-08-12): kcal computed server-side via MET × weight × hours.
+-- source: 'manual' | 'apple_health'. start_iso dedupes Shortcut re-imports.
+CREATE TABLE IF NOT EXISTS exercise_log (
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date TEXT NOT NULL,                 -- '2026-08-12'
+  type TEXT NOT NULL DEFAULT 'other', -- exercise type id (see worker MET table)
+  name TEXT NOT NULL DEFAULT '運動',
+  duration_min REAL NOT NULL DEFAULT 0,
+  kcal INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'manual',
+  start_iso TEXT DEFAULT '',          -- Apple Health workout start, for dedup
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_exercise_user_date ON exercise_log (user_id, date);
