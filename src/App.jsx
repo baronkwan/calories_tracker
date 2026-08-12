@@ -97,12 +97,10 @@ export default function App() {
   const macroTargets = useMemo(() => calcMacroTargets(profile), [profile])
   const daysMap = data.days || {}
 
-  // Best current weight for exercise kcal preview (latest weight log wins).
-  const currentWeight = useMemo(() => {
-    const log = profile.weightLog || []
-    if (log.length) return log[log.length - 1].kg
-    return profile.weightKg
-  }, [profile])
+  // Best current weight for exercise kcal preview. MUST match worker
+  // currentWeightKg priority (profile.weightKg → latest weight_log → 60)
+  // so the sheet preview equals the stored kcal.
+  const currentWeight = profile.weightKg
 
   const now = useMemo(() => new Date(), [])
   const todayKey = dateKey(now)
@@ -261,9 +259,10 @@ export default function App() {
   }
 
   // Exercises: server-authoritative kcal — await POST, then append the stored row.
+  // kcal override only for 自訂運動 (other); typed exercises use the server's MET calc.
   const handleAddExercise = async (payload) => {
     try {
-      const res = await addExercise(payload.date, payload.type, payload.durationMin, payload.kcal, payload.name)
+      const res = await addExercise(payload.date, payload.type, payload.durationMin, payload.type === 'other' ? payload.kcal : undefined, payload.name)
       setExercises((xs) => [
         ...xs,
         { id: res.id, date: payload.date, type: payload.type, name: payload.name, duration_min: payload.durationMin, kcal: res.kcal, source: 'manual' },
@@ -440,7 +439,7 @@ export default function App() {
               <div className="text-[11px]" style={{ color: 'var(--text3)' }}>運動消耗 / {rangeStats.totalDays}日</div>
             </div>
             <div className="group-list px-4 py-3">
-              <div className="tnum text-[20px] font-bold" style={{ color: rangeStats.net <= 0 ? 'var(--green)' : 'var(--red)' }}>
+              <div className="tnum text-[20px] font-bold" style={{ color: rangeStats.net > budget * rangeStats.totalDays ? 'var(--red)' : 'var(--green)' }}>
                 {fmt(rangeStats.net)}
               </div>
               <div className="text-[11px]" style={{ color: 'var(--text3)' }}>淨攝入（食物 − 運動）</div>
