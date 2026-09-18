@@ -30,7 +30,14 @@ export default function App() {
   const [user, setUser] = useState(null)
   const [data, setData] = useState({ budget: 2073, days: {}, foods: [] })
   const [tab, setTab] = useState('today')
-  const [dark, setDark] = useState(false)
+  // Resolve the theme in the initialiser, NOT in a mount effect: an effect would run
+  // after the [dark] effect below and immediately write 'light' back over a saved 'dark',
+  // so a dark-mode user got a light flash and lost the preference on every reload.
+  const [dark, setDark] = useState(() => {
+    const stored = localStorage.getItem('cd-theme')
+    if (stored) return stored === 'dark'
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+  })
   const [profile, setProfile] = useState(() => loadProfile())
   const [selectedDate, setSelectedDate] = useState(() => new Date())
   const [monthOffset, setMonthOffset] = useState(0)
@@ -43,14 +50,6 @@ export default function App() {
   const [editingItem, setEditingItem] = useState(null) // { date, mealIdx, itemIdx, item }
   const [confirmDeleteDay, setConfirmDeleteDay] = useState(null) // date string
   const [loadError, setLoadError] = useState('')
-
-  useEffect(() => {
-    const stored = localStorage.getItem('cd-theme')
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-    const initial = stored ? stored === 'dark' : prefersDark
-    setDark(initial)
-    document.documentElement.classList.toggle('dark', initial)
-  }, [])
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark)

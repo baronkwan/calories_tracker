@@ -6,6 +6,7 @@ import {
 } from '../lib/profile.js'
 import { dateKey } from '../lib/data.js'
 import { saveWeightRemote, saveProfileRemote, changePassword } from '../lib/api.js'
+import WeightChart from './WeightChart.jsx'
 
 function Stepper({ label, value, onChange, min, max, suffix, step = 1 }) {
   return (
@@ -120,9 +121,6 @@ export default function ProfileTab({ profile, onSave, user, onLogout }) {
   }
 
   const weightLog = [...(draft.weightLog || [])].sort((a, b) => a.date.localeCompare(b.date))
-  const wMin = weightLog.length ? Math.min(...weightLog.map((w) => w.kg)) : draft.weightKg
-  const wMax = weightLog.length ? Math.max(...weightLog.map((w) => w.kg)) : draft.weightKg
-  const wRange = Math.max(wMax - wMin, 0.5)
 
   const goalIcon = draft.goal === 'lose' ? TrendingDown : draft.goal === 'gain' ? TrendingUp : MinusCircle
 
@@ -239,31 +237,18 @@ export default function ProfileTab({ profile, onSave, user, onLogout }) {
             + 記錄今日
           </button>
         </div>
-        {weightLog.length > 1 ? (
+        {weightLog.length > 0 ? (
           <div className="px-4 pb-4">
-            <svg viewBox="0 0 300 70" className="w-full" style={{ height: 70 }}>
-              {weightLog.map((w, i) => {
-                const x = 10 + (i / Math.max(weightLog.length - 1, 1)) * 280
-                const y = 62 - ((w.kg - wMin) / wRange) * 48
-                return (
-                  <g key={w.date}>
-                    {i > 0 && (
-                      <line x1={10 + ((i - 1) / Math.max(weightLog.length - 1, 1)) * 280} y1={62 - ((weightLog[i - 1].kg - wMin) / wRange) * 48} x2={x} y2={y} stroke="var(--accent)" strokeWidth="2" />
-                    )}
-                    <circle cx={x} cy={y} r="3.5" fill="var(--accent)" />
-                  </g>
-                )
-              })}
-            </svg>
-            <div className="mt-1 flex justify-between text-[10px]" style={{ color: 'var(--text3)' }}>
-              <span>{weightLog[0]?.date}</span>
-              <span className="tnum">{wMin.toFixed(1)} – {wMax.toFixed(1)} kg</span>
-              <span>{weightLog[weightLog.length - 1]?.date}</span>
-            </div>
+            <WeightChart log={weightLog} goal={draft.goal} />
+            {weightLog.length === 1 && (
+              <div className="mt-2 text-[12px]" style={{ color: 'var(--text3)' }}>
+                再磅多幾次就見到趨勢線 —— 隔日或每日磅一次最靚
+              </div>
+            )}
           </div>
         ) : (
           <div className="px-4 pb-4 text-[12px]" style={{ color: 'var(--text3)' }}>
-            {weightLog.length === 1 ? '記錄多一次體重就出趨勢圖' : '按「記錄今日」開始追蹤體重變化'}
+            按「記錄今日」開始追蹤體重變化
           </div>
         )}
       </div>
