@@ -13,7 +13,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const WIKI_DIR = path.join(process.env.HOME, 'wiki', 'general', 'health', 'diet')
 const BASE = process.argv[2] || 'https://calorie-api.baronjetso.workers.dev'
 
-function fmtDayFile(date, meals, total) {
+const NOTE_HEADING = '## 備註'
+
+/** Carry over the hand-written 備註 block so the hourly D1→wiki pull can't wipe it. */
+function extractNotes(filePath) {
+  if (!fs.existsSync(filePath)) return ''
+  const raw = fs.readFileSync(filePath, 'utf8')
+  const idx = raw.indexOf(NOTE_HEADING)
+  return idx === -1 ? '' : raw.slice(idx).trimEnd()
+}
+
+function fmtDayFile(date, meals, total, notes = '') {
   const lines = [
     '---',
     `title: 飲食記錄 ${date}`,
@@ -39,6 +49,7 @@ function fmtDayFile(date, meals, total) {
     lines.push(`| **小計** | | **${meal.total}** |`, '')
   }
   lines.push('## 小計', '', '| 項目 | kcal |', '|------|------|', `| 總攝入 | ${total} |`, '| 預算 | 2073 |', `| 剩餘 | ${2073 - total} |`, '| 狀態 | 自動同步 |')
+  if (notes) lines.push('', notes)
   return lines.join('\n') + '\n'
 }
 
@@ -70,7 +81,7 @@ fs.mkdirSync(WIKI_DIR, { recursive: true })
 let updated = 0
 for (const [date, day] of Object.entries(days).sort()) {
   const filePath = path.join(WIKI_DIR, `${date}.md`)
-  const newContent = fmtDayFile(date, day.meals, day.total)
+  const newContent = fmtDayFile(date, day.meals, day.total, extractNotes(filePath))
   if (wikiSignature(filePath) !== wikiSignatureFromContent(newContent)) {
     fs.writeFileSync(filePath, newContent)
     updated++
