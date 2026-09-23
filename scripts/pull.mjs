@@ -41,7 +41,11 @@ function fmtDayFile(date, meals, total, notes = '') {
     `- 總攝入: ${total} kcal`,
     '',
   ]
-  for (const meal of meals) {
+  // D1 must only hold food meals. Anything else (a bad sync once pushed 運動 /
+  // 備註 sections in as meals) is dropped here so it can't be re-rendered and
+  // fed back through sync.mjs.
+  const foodMeals = (meals || []).filter((m) => !/運動|備註|小計|狀態|明細|總結|摘要|圖表/.test(m.name || ''))
+  for (const meal of foodMeals) {
     lines.push(`## ${meal.name}`, '', '| 食物 | 份量 | kcal |', '|------|------|------|')
     for (const it of meal.items) {
       lines.push(`| ${it.name} | ${it.portion || '1'} | ${it.kcal} |`)
@@ -58,6 +62,8 @@ function wikiSignature(filePath) {
   if (!fs.existsSync(filePath)) return null
   const raw = fs.readFileSync(filePath, 'utf8')
   const items = []
+  const totalLine = raw.match(/^-\s*總攝入:\s*(\d+)/m) || raw.match(/\|\s*總攝入\s*\|\s*([\d,.]+)\s*\|/)
+  if (totalLine) items.push(`total=${totalLine[1]}`)
   for (const line of raw.split('\n')) {
     if (!line.startsWith('|')) continue
     const cells = line.split('|').map((c) => c.trim()).filter((c) => c !== '')
@@ -93,6 +99,10 @@ process.exit(0)
 
 function wikiSignatureFromContent(content) {
   const items = []
+  // Include the day total: a total-only correction (e.g. after cleaning a bad
+  // push) must also trigger a rewrite, otherwise the stale value lives on.
+  const totalLine = content.match(/^-\s*總攝入:\s*(\d+)/m) || content.match(/\|\s*總攝入\s*\|\s*([\d,.]+)\s*\|/)
+  if (totalLine) items.push(`total=${totalLine[1]}`)
   for (const line of content.split('\n')) {
     if (!line.startsWith('|')) continue
     const cells = line.split('|').map((c) => c.trim()).filter((c) => c !== '')

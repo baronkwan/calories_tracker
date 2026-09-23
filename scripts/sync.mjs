@@ -53,23 +53,36 @@ function parseReference(filePath) {
  */
 function portionMultiplier(portion, refPortion) {
   const s = (portion || '').trim()
+  const r = String(refPortion || '').trim()
   if (!s) return 1
-  const numMatch = s.match(/^(\d+(?:\.\d+)?)/)
-  const fracMatch = s.match(/^(\d+)\s*\/\s*(\d+)/)
+
+  // Explicit fraction (1/4 包)
+  const frac = s.match(/^(\d+)\s*\/\s*(\d+)/)
+  if (frac) return parseFloat(frac[1]) / parseFloat(frac[2])
+
   const half = s.startsWith('半') ? 0.5 : 1
-  let mult = 1
-  if (fracMatch) {
-    mult = parseFloat(fracMatch[1]) / parseFloat(fracMatch[2])
-  } else if (/[gml]$/i.test(s) && refPortion) {
-    const rNum = String(refPortion).match(/(\d+(?:\.\d+)?)\s*(?:g|ml)/i)
-    if (numMatch && rNum) mult = parseFloat(numMatch[1]) / parseFloat(rNum[1])
-    else mult = half
-  } else if (numMatch) {
-    mult = parseFloat(numMatch[1]) * half
-  } else {
-    mult = half
+
+  // Weight anywhere in either string — handles "1片 (~80g)" vs ref "100g"
+  const sw = s.match(/(\d+(?:\.\d+)?)\s*(?:g|ml)\b/i)
+  const rw = r.match(/(\d+(?:\.\d+)?)\s*(?:g|ml)\b/i)
+  if (sw && rw) return parseFloat(sw[1]) / parseFloat(rw[1])
+  // One side is weight-based only → reference macros are per that unit; keep 1×
+  if (sw || rw) return half
+
+  // Count units
+  const cNum = s.match(/^(\d+(?:\.\d+)?)/)
+  const rNum = r.match(/^(\d+(?:\.\d+)?)/)
+  const unit = s.match(/[件個隻杯碗份片條塊球盒包罐碟貫]/)
+  const rUnit = r.match(/[件個隻杯碗份片條塊球盒包罐碟貫]/)
+  if (cNum && rNum) {
+    const cn = parseFloat(cNum[1]) * half
+    const rn = parseFloat(rNum[1])
+    // Same unit AND same count → the reference row already describes this exact
+    // portion. Scaling again inflated macros (3件 × 3 → P 197g for a 1,295 kcal day).
+    if (unit && rUnit && unit[0] === rUnit[0] && cn === rn) return 1
+    return cn / rn
   }
-  return mult > 0 ? mult : 1
+  return cNum ? parseFloat(cNum[1]) * half : half
 }
 
 /** Longest common substring length (names are short, O(n·m) fine) */
@@ -119,7 +132,11 @@ function parseDayFile(filePath, refMap) {
     const heading = line.match(/^##\s+(.+)/)
     if (heading) {
       const label = heading[1].replace(/\s*（.+?）\s*$/, '').trim()
-      if (!label.includes('小計') && !label.includes('狀態')) {
+      // Only food sections are meals. 運動明細 / 備註 / 小計 / 狀態 … are
+      // documentation, and a naive "every ## is a meal" rule pushed them into D1
+      // as bogus meals (the app then rendered one 運動 block per bogus meal).
+      const isDoc = /運動|備註|小計|狀態|明細|總結|摘要|圖表/.test(label)
+      if (!isDoc) {
         currentMeal = { name: label, items: [], total: 0 }
         meals.push(currentMeal)
       } else {
@@ -135,6 +152,8 @@ function parseDayFile(filePath, refMap) {
     if (cells[0].replace(/[-:]/g, '').trim() === '') continue
     if (cells[0].startsWith('**')) continue
     if (cells[0] === '_未記錄_') continue
+    // Exercise rows carry a duration/type column — never food.
+    if (cells.some((c) => /^\d+\s*min$/i.test(c))) continue
     const kcal = parseNum(cells[cells.length - 1])
     if (kcal === 0) continue
     const item = { name: cells[0], portion: cells[1], kcal }
@@ -156,7 +175,9 @@ function parseDayFile(filePath, refMap) {
 
   return {
     date,
-    meals: meals.filter((m) => m.items.length > 0),
+    // De-dupe by meal name, last wins: repeated identical sections (the old
+    // pull→sync feedback loop) must never reach D1 as separate meals.
+    meals: [...new Map(meals.filter((m) => m.items.length > 0).map((m) => [m.name, m])).values()],
     total: sourceTotal || total,
   }
 }
