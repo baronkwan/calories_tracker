@@ -6,6 +6,7 @@ import {
 } from '../lib/profile.js'
 import { dateKey } from '../lib/data.js'
 import { saveWeightRemote, saveProfileRemote, changePassword } from '../lib/api.js'
+import APP_VERSION from '../lib/version.js'
 import WeightChart from './WeightChart.jsx'
 
 function Stepper({ label, value, onChange, min, max, suffix, step = 1 }) {
@@ -283,6 +284,9 @@ export default function ProfileTab({ profile, onSave, user, onLogout }) {
           </button>
           {pwMsg && <div className="text-[12px]" style={{ color: pwMsg.startsWith('✓') ? 'var(--green)' : 'var(--red)' }}>{pwMsg}</div>}
         </div>
+      </div>
+      <div className="pt-2 text-center text-[11px]" style={{ color: 'var(--text3)' }}>
+        版本 {APP_VERSION}
       </div>
     </div>
   )

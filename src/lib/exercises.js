@@ -42,12 +42,26 @@ export function estimateKcal(typeId, weightKg, durationMin) {
 }
 
 // Exercises for a given day key, oldest first.
+// Dedupe defensively: a repeated row (same id, or same day/type/name/duration/kcal)
+// must never render twice — duplicates in the list are a display bug, not data.
+function dedupe(list) {
+  const seen = new Set()
+  return (list || []).filter((e) => {
+    const k = e.id != null
+      ? `id:${e.id}`
+      : `${e.date}|${e.type}|${e.name}|${e.duration_min}|${e.kcal}`
+    if (seen.has(k)) return false
+    seen.add(k)
+    return true
+  })
+}
+
 export function dayExercises(exercises, key) {
-  return (exercises || []).filter((e) => e.date === key).sort((a, b) => a.id - b.id)
+  return dedupe(exercises).filter((e) => e.date === key).sort((a, b) => a.id - b.id)
 }
 
 export function dayBurn(exercises, key) {
-  return (exercises || []).filter((e) => e.date === key).reduce((s, e) => s + (e.kcal || 0), 0)
+  return dedupe(exercises).filter((e) => e.date === key).reduce((s, e) => s + (e.kcal || 0), 0)
 }
 
 export function fmtDuration(min) {
